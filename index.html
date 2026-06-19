@@ -92,6 +92,22 @@ function pinSVG(color){
   return "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(svg)));
 }
 
+let mapReady = false;
+
+// 목록/필터는 지도와 무관하게 항상 먼저 그린다
+function init(){
+  markers = RESTAURANTS.map(function(r){
+    return { data: r, marker: null, place_url: null, foundAddr: null, lat: null, lng: null, tried: false };
+  });
+  buildFilters();
+  document.getElementById('total').textContent = RESTAURANTS.length;
+  document.getElementById('search').addEventListener('input', function(e){ query = e.target.value.trim(); render(); });
+  document.getElementById('toggle').addEventListener('click', function(){
+    document.getElementById('sidebar').classList.toggle('open'); });
+  render();
+}
+
+// 지도는 카카오 SDK 로드 성공 시에만 실행
 function initMap(){
   map = new kakao.maps.Map(document.getElementById('map'), {
     center: new kakao.maps.LatLng(33.40, 126.55),
@@ -101,35 +117,29 @@ function initMap(){
   infowindow = new kakao.maps.InfoWindow({ removable: true, zIndex: 100 });
   places = new kakao.maps.services.Places();
   geocoder = new kakao.maps.services.Geocoder();
-
-  buildFilters();
-  document.getElementById('total').textContent = RESTAURANTS.length;
-  document.getElementById('search').addEventListener('input', function(e){ query = e.target.value.trim(); render(); });
-  document.getElementById('toggle').addEventListener('click', function(){
-    document.getElementById('sidebar').classList.toggle('open'); });
-
+  mapReady = true;
   geocodeAll();
 }
 
 function geocodeAll(){
   let i = 0;
   function next(){
-    if (i >= RESTAURANTS.length){ render(); return; }
-    const r = RESTAURANTS[i]; const idx = i; i++;
+    if (i >= markers.length){ render(); return; }
+    const e = markers[i]; const r = e.data; const idx = i; i++;
     places.keywordSearch(r.name + " 제주", function(res, status){
       if (status === kakao.maps.services.Status.OK && res.length){
         let hit = null;
         for (let k=0;k<res.length;k++){ if ((res[k].address_name||"").indexOf("제주")>=0){ hit=res[k]; break; } }
         if (!hit) hit = res[0];
-        addMarker(r, parseFloat(hit.y), parseFloat(hit.x), hit.place_url, hit.road_address_name || hit.address_name);
+        attachMarker(e, parseFloat(hit.y), parseFloat(hit.x), hit.place_url, hit.road_address_name || hit.address_name);
         if (idx % 5 === 0) render();
         setTimeout(next, 120);
       } else {
         geocoder.addressSearch(cleanAddr(r.addr), function(gres, gstatus){
           if (gstatus === kakao.maps.services.Status.OK && gres.length){
-            addMarker(r, parseFloat(gres[0].y), parseFloat(gres[0].x), null, null);
+            attachMarker(e, parseFloat(gres[0].y), parseFloat(gres[0].x), null, null);
           } else {
-            addMarker(r, null, null, null, null);
+            attachMarker(e, null, null, null, null);
           }
           if (idx % 5 === 0) render();
           setTimeout(next, 120);
@@ -142,19 +152,20 @@ function geocodeAll(){
 
 function cleanAddr(a){ return a.split("/")[0].replace(/\(.*?\)/g,"").trim(); }
 
-function addMarker(r, lat, lng, place_url, foundAddr){
-  const entry = { data: r, marker: null, place_url: place_url, foundAddr: foundAddr, lat: lat, lng: lng };
+function attachMarker(e, lat, lng, place_url, foundAddr){
+  e.tried = true; e.lat = lat; e.lng = lng;
+  if (place_url) e.place_url = place_url;
+  if (foundAddr) e.foundAddr = foundAddr;
   if (lat && lng){
     const marker = new kakao.maps.Marker({
       position: new kakao.maps.LatLng(lat, lng),
-      image: new kakao.maps.MarkerImage(pinSVG(CAT_COLOR[r.cat]||"#868e96"),
+      image: new kakao.maps.MarkerImage(pinSVG(CAT_COLOR[e.data.cat]||"#868e96"),
               new kakao.maps.Size(26,34), { offset: new kakao.maps.Point(13,34) }),
-      title: r.name
+      title: e.data.name
     });
-    kakao.maps.event.addListener(marker, 'click', function(){ openInfo(entry); });
-    entry.marker = marker;
+    kakao.maps.event.addListener(marker, 'click', function(){ openInfo(e); });
+    e.marker = marker;
   }
-  markers.push(entry);
 }
 
 function kakaoLink(e){
@@ -200,19 +211,22 @@ function visible(e){
 }
 
 function render(){
-  const shown = markers.filter(function(e){ return e.marker && visible(e); });
-  clusterer.clear();
-  clusterer.addMarkers(shown.map(function(e){ return e.marker; }));
+  if (clusterer){
+    const shown = markers.filter(function(e){ return e.marker && visible(e); });
+    clusterer.clear();
+    clusterer.addMarkers(shown.map(function(e){ return e.marker; }));
+  }
 
   const listEl = document.getElementById('list');
   const all = markers.filter(visible);
   listEl.innerHTML = "";
   all.forEach(function(e){
     const r = e.data;
+    const unresolved = mapReady && e.tried && !e.marker;
     const div = document.createElement('div');
     div.className = 'item';
     div.innerHTML = '<div class="nm"><span class="dot" style="background:' + CAT_COLOR[r.cat] + '"></span>' + r.name
-        + (e.marker ? "" : ' <span style="font-size:10px;color:#fa5252">·위치미확인</span>') + '</div>'
+        + (unresolved ? ' <span style="font-size:10px;color:#fa5252">·위치미확인</span>' : '') + '</div>'
       + '<div class="mn">' + r.menu + '</div><div class="ad">' + (e.foundAddr || r.addr) + '</div>';
     div.onclick = function(){
       if (e.marker){ openInfo(e); document.getElementById('sidebar').classList.remove('open'); }
@@ -220,19 +234,31 @@ function render(){
     };
     listEl.appendChild(div);
   });
+  const tried = markers.filter(function(e){ return e.tried; }).length;
   document.getElementById('count').textContent =
-    all.length + "곳 표시중" + (markers.length < RESTAURANTS.length ? " (위치 불러오는 중... " + markers.length + "/" + RESTAURANTS.length + ")" : "");
+    all.length + "곳" + (mapReady && tried < markers.length ? " (지도 위치 불러오는 중... " + tried + "/" + markers.length + ")" : "");
 }
 
-(function loadSDK(){
+function mapNotice(msg){
+  document.getElementById('map').innerHTML =
+    '<div style="padding:40px;font-size:15px;line-height:1.7;color:#495057">' + msg + '</div>';
+}
+
+(function boot(){
+  init(); // 목록/필터 먼저 (지도와 무관하게 항상 표시)
+
   if (KAKAO_JS_KEY.indexOf("PASTE") === 0){
-    document.getElementById('map').innerHTML =
-      '<div style="padding:40px;font-size:15px;line-height:1.7;color:#495057">⚠️ <b>카카오 JavaScript 키를 먼저 넣어주세요.</b><br>이 HTML 파일을 열어 <code>KAKAO_JS_KEY</code> 값을 발급받은 키로 바꾸면 지도가 나타납니다.</div>';
+    mapNotice('⚠️ <b>카카오 JavaScript 키를 먼저 넣어주세요.</b><br><code>KAKAO_JS_KEY</code> 값을 발급받은 키로 바꾸면 지도가 나타납니다.');
+    return;
+  }
+  if (location.protocol === 'file:'){
+    mapNotice('⚠️ <b>지금 파일을 직접 연 상태(file://)예요.</b><br>카카오 지도는 file://에서는 동작하지 않습니다.<br>왼쪽 목록은 정상입니다 — 지도까지 보려면 <code>http://localhost:8000</code> 이나 GitHub Pages 주소로 여세요.');
     return;
   }
   const s = document.createElement('script');
   s.src = "https://dapi.kakao.com/v2/maps/sdk.js?appkey=" + KAKAO_JS_KEY + "&libraries=services,clusterer&autoload=false";
   s.onload = function(){ kakao.maps.load(initMap); };
+  s.onerror = function(){ mapNotice('지도 SDK를 불러오지 못했습니다. 인터넷 연결, 또는 카카오 개발자 콘솔의 도메인 등록을 확인하세요.'); };
   document.head.appendChild(s);
 })();
 </script>
