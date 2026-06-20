@@ -241,7 +241,9 @@ function render(){
   }
 
   const listEl = document.getElementById('list');
-  const all = markers.filter(visible);
+  const all = markers.filter(visible).sort(function(a, b){
+    return a.data.name.localeCompare(b.data.name, 'ko');  // 상호명 ㄱㄴㄷ 순
+  });
   listEl.innerHTML = "";
   all.forEach(function(e){
     const r = e.data;
