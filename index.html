@@ -36,18 +36,40 @@
   .iw .a { font-size: 12px; color: #868e96; margin-top: 4px; line-height: 1.4; }
   .iw a.kbtn { display: block; text-align: center; margin-top: 9px; padding: 8px; background: #fae100; color: #3c1e1e; font-weight: 700; font-size: 13px; border-radius: 7px; text-decoration: none; }
 
-  #toggle { display: none; position: absolute; top: 12px; left: 12px; z-index: 6; background: #fff; border: 1px solid #dee2e6; border-radius: 8px; padding: 9px 13px; font-size: 13px; font-weight: 700; box-shadow: 0 2px 8px rgba(0,0,0,.12); cursor: pointer; }
+  #toggle { display: none; }
+  #handle { display: none; }
 
+  /* ===== 모바일: 지도 풀스크린 + 하단 바텀시트 ===== */
   @media (max-width: 720px) {
-    #sidebar { position: absolute; top: 0; left: 0; height: 100%; transform: translateX(-100%); transition: transform .25s; box-shadow: 2px 0 16px rgba(0,0,0,.18); width: 86%; max-width: 360px; }
-    #sidebar.open { transform: translateX(0); }
-    #toggle { display: block; }
+    #app { display: block; }
+    #map { position: absolute; inset: 0; height: 100%; }
+
+    #sidebar {
+      position: fixed; left: 0; right: 0; bottom: 0; width: 100%; max-width: none;
+      height: 42vh; border-right: none;
+      border-top-left-radius: 18px; border-top-right-radius: 18px;
+      box-shadow: 0 -4px 22px rgba(0,0,0,.18);
+      transition: height .28s cubic-bezier(.4,0,.2,1); z-index: 10;
+    }
+    #sidebar.expanded { height: 90vh; }
+
+    #handle { display: block; flex-shrink: 0; padding: 9px 0 5px; text-align: center; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+    #handle::before { content: ""; display: inline-block; width: 42px; height: 5px; background: #ced4da; border-radius: 999px; vertical-align: middle; }
+
+    #head { padding: 2px 16px 10px; }
+    #head h1 { font-size: 16px; }
+    #search { font-size: 16px; }            /* iOS 입력 시 자동 확대 방지 */
+    .item { padding: 14px 16px; }           /* 손가락 탭 영역 확대 */
+    .chip { padding: 7px 12px; font-size: 13px; }
+    #list { padding-bottom: env(safe-area-inset-bottom); }
+    .iw { max-width: 220px; }
   }
 </style>
 </head>
 <body>
 <div id="app">
   <div id="sidebar">
+    <div id="handle"></div>
     <div id="head">
       <h1>제주 맛집 지도</h1>
       <div class="sub">총 <b id="total">0</b>곳 · 마커를 누르면 카카오맵 평점/리뷰로 연결돼요</div>
@@ -102,8 +124,9 @@ function init(){
   buildFilters();
   document.getElementById('total').textContent = RESTAURANTS.length;
   document.getElementById('search').addEventListener('input', function(e){ query = e.target.value.trim(); render(); });
-  document.getElementById('toggle').addEventListener('click', function(){
-    document.getElementById('sidebar').classList.toggle('open'); });
+  var handle = document.getElementById('handle');
+  if (handle) handle.addEventListener('click', function(){
+    document.getElementById('sidebar').classList.toggle('expanded'); });
   render();
 }
 
@@ -229,7 +252,7 @@ function render(){
         + (unresolved ? ' <span style="font-size:10px;color:#fa5252">·위치미확인</span>' : '') + '</div>'
       + '<div class="mn">' + r.menu + '</div><div class="ad">' + (e.foundAddr || r.addr) + '</div>';
     div.onclick = function(){
-      if (e.marker){ openInfo(e); document.getElementById('sidebar').classList.remove('open'); }
+      if (e.marker){ openInfo(e); document.getElementById('sidebar').classList.remove('expanded'); }
       else { window.open(kakaoLink(e), '_blank'); }
     };
     listEl.appendChild(div);
